@@ -324,9 +324,97 @@ class Solve:
         self.get_state_value_by_policy(np.eye(self.action_space_size, dtype=int)[np.argmax(self.policy, axis=-1)], 100, gamma)
 
 
-    def td_sarsa(self, epoch, gamma, epsilon=0.1, episode=100, sample_nums=50):
+    def td_sarsa(self, epoch, gamma, alpha=0.1, epsilon=0.1, episode_nums=100, sample_nums=50):
         
-        pass
+        def sample_by_sa(env: GridEnv, policy, state_start, action_start, episode, sample_nums):
+            
+            states_all = []
+            actions_all = []
+            rewards_all = []
+            indices = np.arange(env.action_space_size)
+            for _ in range(sample_nums):
+                env.agent_location = state_start
+                action = action_start
+                rewards = []
+                states = []
+                actions = []
+
+                for i in range(episode):
+                    states.append(env.pos2state(env.agent_location))
+                    actions.append(action)
+
+                    # env.render_.draw_episode()
+
+                    _, reward, terminated, _, _ = env.step(action)
+
+                    action_cur_probs = policy[env.pos2state(env.agent_location)]
+                    action = np.random.choice(indices, p=action_cur_probs)
+                    
+                    rewards.append(reward)
+
+                    if terminated:
+                        states.append(env.pos2state(env.agent_location))
+                        actions.append(action)
+                        _, reward, terminated, _, _ = env.step(action)
+                        rewards.append(reward)
+                        break
+
+                env.reset()
+
+                states_all.append(states)
+                actions_all.append(actions)
+                rewards_all.append(rewards)
+
+            # env.render_.draw_episode()
+            # env.render_.show_frame()
+            return states_all, actions_all, rewards_all
+
+        def exp2episode(states, actions, rewards):
+            episode = []
+            for i in range(len(states)-1):
+                episode.append((states[i], actions[i], rewards[i], states[i+1], actions[i+1]))
+            return episode
+
+        self.env.reward_list = [0, 1, -10, -1]
+
+        # self.policy = np.eye(5, dtype=int)[[4]*self.state_space_size]
+        gamma_sample_nums = gamma ** np.arange(episode_nums)
+        gamma_sample_nums = np.expand_dims(gamma_sample_nums, 0)
+
+        action_value_all = np.ones(shape=(self.state_space_size, self.action_space_size)) * -10000
+
+        for _ in tqdm(range(epoch), total=epoch):
+
+            # # for i in tqdm(range(self.state_space_size), total=self.state_space_size, desc="states "):
+            # for i in range(self.state_space_size):
+            #     pos_cur = self.env.state2pos(i)
+
+            #     for j in range(self.action_space_size):
+
+            #         for __ in range(sample_nums):
+            #             action_cur = j
+
+            q_value = np.zeros(shape=(self.state_space_size, self.action_space_size))
+            action_value_env = [[-10000]*self.env.action_space_size for _ in range(self.state_space_size)]
+            action_value_env_nums = [[0]*self.env.action_space_size for _ in range(self.state_space_size)]
+
+            states, actions, rewards = sample_by_sa(self.env, self.policy, self.env.state2pos(0), 0, episode_nums, 1)
+            states, actions, rewards = states[0], actions[0], rewards[0]
+            
+            episode = exp2episode(states, actions, rewards)
+
+            for state, action, reward, state_next, action_next in episode:
+                td_target = reward + gamma * q_value[state_next][action_next]
+                td_error =  q_value[state][action] - td_target
+                q_value[state][action] = q_value[state][action] - alpha * td_error
+            
+            action_value_all = np.maximum(action_value_all, q_value).tolist()
+
+            self.policy = np.full((self.state_space_size, self.env.action_space_size), round(epsilon/self.env.action_space_size, 8))
+            for state in range(self.state_space_size):
+                self.policy[state][np.argmax(action_value_all[state])] = 1 - round(epsilon/self.env.action_space_size, 8)*(self.env.action_space_size-1)
+        
+        self.get_state_value_by_policy(self.policy, 100, gamma)
 
 
 if __name__ == "__main__":
@@ -354,15 +442,22 @@ if __name__ == "__main__":
         需要设置全局 qvalue，获取不同 policy 的最大 qvalue，以此更新 policy
         还是有点bug
     """
-    solver.mc_epsilon_greedy(
-        epsilon=0.1,
-        epoch=1000,
-        episode=1000,
-        gamma=0.7,
+    # solver.mc_epsilon_greedy(
+    #     epsilon=0.1,
+    #     epoch=1000,
+    #     episode=1000,
+    #     gamma=0.7,
+    #     sample_nums=1
+    # )
+
+    solver.td_sarsa(
+        alpha=0.1,
+        epsilon=0.8,
+        epoch=10000,
+        episode_nums=10000,
+        gamma=0.9,
         sample_nums=1
     )
-
-
 
     solver.show_policy(solver.policy)
     solver.show_state_value(solver.state_value)
