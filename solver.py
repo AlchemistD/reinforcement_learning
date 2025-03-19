@@ -518,7 +518,117 @@ class Solve:
         
         self.get_state_value_by_policy(self.policy, 100, gamma)
 
-    def td_qlearning(self, epoch, gamma, alpha=0.1, epsilon=0.1, episode_nums=100, sample_nums=50):
+    def td_qlearning_off_policy(self, epoch, gamma, alpha=0.1, epsilon=0.1, episode_nums=100, sample_nums=50):
+        
+        def sample_by_sa(env: GridEnv, policy, state_start, action_start, episode, sample_nums):
+            
+            states_all = []
+            actions_all = []
+            rewards_all = []
+            indices = np.arange(env.action_space_size)
+            for _ in range(sample_nums):
+                env.agent_location = state_start
+                action = action_start
+                rewards = []
+                states = []
+                actions = []
+
+                for i in range(episode):
+                    states.append(env.pos2state(env.agent_location))
+                    actions.append(action)
+
+                    # env.render_.draw_episode()
+
+                    _, reward, terminated, _, _ = env.step(action)
+
+                    action_cur_probs = policy[env.pos2state(env.agent_location)]
+                    action = np.random.choice(indices, p=action_cur_probs)
+                    
+                    rewards.append(reward)
+
+                    if terminated:
+                        states.append(env.pos2state(env.agent_location))
+                        actions.append(action)
+                        _, reward, terminated, _, _ = env.step(action)
+                        rewards.append(reward)
+                        break
+
+                env.reset()
+
+                states_all.append(states)
+                actions_all.append(actions)
+                rewards_all.append(rewards)
+
+            # env.render_.draw_episode()
+            # env.render_.show_frame()
+            return states_all, actions_all, rewards_all
+
+        def exp2episode(states, actions, rewards):
+            episode = []
+            for i in range(len(states)-1):
+                episode.append((states[i], actions[i], rewards[i], states[i+1], actions[i+1]))
+            return episode
+
+        self.env.reward_list = [0, 1, -10, -1]
+        # self.env.reward_list = [-1, 0, -10, -10]
+
+
+        # self.policy = np.eye(5, dtype=int)[[4]*self.state_space_size]
+        gamma_sample_nums = gamma ** np.arange(episode_nums)
+        gamma_sample_nums = np.expand_dims(gamma_sample_nums, 0)
+
+        # action_value_all = np.ones(shape=(self.state_space_size, self.action_space_size)) * -10000
+        action_value_all = np.zeros(shape=(self.state_space_size, self.action_space_size))
+
+        policy_behavior = self.policy.copy()
+
+        for _ in tqdm(range(epoch), total=epoch):
+
+            # # for i in tqdm(range(self.state_space_size), total=self.state_space_size, desc="states "):
+            # for i in range(self.state_space_size):
+            #     pos_cur = self.env.state2pos(i)
+
+            #     for j in range(self.action_space_size):
+
+            #         for __ in range(sample_nums):
+            #             action_cur = j
+
+            q_value = np.zeros(shape=(self.state_space_size, self.action_space_size))
+            action_value_env = [[-10000]*self.env.action_space_size for _ in range(self.state_space_size)]
+            action_value_env_nums = [[0]*self.env.action_space_size for _ in range(self.state_space_size)]
+
+            states, actions, rewards = sample_by_sa(self.env, policy_behavior, self.env.state2pos(0), 0, episode_nums, 1)
+            states, actions, rewards = states[0], actions[0], rewards[0]
+            
+            episode = exp2episode(states, actions, rewards)
+
+            # for state, action, reward, state_next, action_next in episode:
+            #     estimate_max_q_value = np.max(q_value[state_next])
+            #     # td_target = reward + gamma * q_value[state_next][action_next]
+            #     td_target = reward + gamma * estimate_max_q_value
+            #     td_error =  q_value[state][action] - td_target
+            #     q_value[state][action] = q_value[state][action] - alpha * td_error
+            
+            # # action_value_all = np.maximum(action_value_all, q_value).tolist()
+            # action_value_all += q_value
+
+            for state, action, reward, state_next, action_next in episode:
+                estimate_max_q_value = np.max(action_value_all[state_next])
+                # td_target = reward + gamma * q_value[state_next][action_next]
+                td_target = reward + gamma * estimate_max_q_value
+                td_error =  action_value_all[state][action] - td_target
+                action_value_all[state][action] = action_value_all[state][action] - alpha * td_error
+
+            # action_value_all = np.maximum(action_value_all, q_value).tolist()
+
+            self.policy = np.full((self.state_space_size, self.env.action_space_size), round(epsilon/self.env.action_space_size, 8))
+            for state in range(self.state_space_size):
+                self.policy[state][np.argmax(action_value_all[state])] = 1 - round(epsilon/self.env.action_space_size, 8)*(self.env.action_space_size-1)
+        
+        self.get_state_value_by_policy(self.policy, 100, gamma)
+
+
+    def td_qlearning_on_policy(self, epoch, gamma, alpha=0.1, epsilon=0.1, episode_nums=100, sample_nums=50):
         
         def sample_by_sa(env: GridEnv, policy, state_start, action_start, episode, sample_nums):
             
@@ -600,15 +710,24 @@ class Solve:
             
             episode = exp2episode(states, actions, rewards)
 
+            # for state, action, reward, state_next, action_next in episode:
+            #     estimate_max_q_value = np.max(q_value[state_next])
+            #     # td_target = reward + gamma * q_value[state_next][action_next]
+            #     td_target = reward + gamma * estimate_max_q_value
+            #     td_error =  q_value[state][action] - td_target
+            #     q_value[state][action] = q_value[state][action] - alpha * td_error
+            
+            # # action_value_all = np.maximum(action_value_all, q_value).tolist()
+            # action_value_all += q_value
+
             for state, action, reward, state_next, action_next in episode:
-                estimate_max_q_value = np.max(q_value[state_next])
+                estimate_max_q_value = np.max(action_value_all[state_next])
                 # td_target = reward + gamma * q_value[state_next][action_next]
                 td_target = reward + gamma * estimate_max_q_value
-                td_error =  q_value[state][action] - td_target
-                q_value[state][action] = q_value[state][action] - alpha * td_error
-            
+                td_error =  action_value_all[state][action] - td_target
+                action_value_all[state][action] = action_value_all[state][action] - alpha * td_error
+
             # action_value_all = np.maximum(action_value_all, q_value).tolist()
-            action_value_all += q_value
 
             self.policy = np.full((self.state_space_size, self.env.action_space_size), round(epsilon/self.env.action_space_size, 8))
             for state in range(self.state_space_size):
@@ -668,7 +787,7 @@ if __name__ == "__main__":
     #     sample_nums=1
     # )
 
-    solver.td_qlearning(
+    solver.td_qlearning_on_policy(
         alpha=0.1,
         epsilon=0.1,
         epoch=100,
@@ -676,6 +795,15 @@ if __name__ == "__main__":
         gamma=0.9,
         sample_nums=1
     )
+
+    # solver.td_qlearning_off_policy(
+    #     alpha=0.1,
+    #     epsilon=0.1,
+    #     epoch=100,
+    #     episode_nums=10000,
+    #     gamma=0.9,
+    #     sample_nums=1
+    # )
 
     solver.show_policy(solver.policy)
     solver.show_state_value(solver.state_value)
